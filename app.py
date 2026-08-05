@@ -1,460 +1,321 @@
 import streamlit as st
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from google import genai
+import google.generativeai as genai
+from PIL import Image
+import json
+import os
 from datetime import datetime
-import pandas as pd
-import re
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from io import BytesIO
 
-st.set_page_config(page_title="AIEssayist Pro v8.0 Ecosystem", page_icon="🌱", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="AIEssayist - AI for Life 2026", layout="wide", initial_sidebar_state="expanded")
 
-# Thêm CSS để điều chỉnh khoảng cách dòng (line-height) thành 1.6 (tương đương 1.15 em) cho dễ đọc hơn
-st.markdown("""
+st.markdown('''
     <style>
-    .main { background-color: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    .stTabs [data-baseweb="tab"] { font-size: 16px; font-weight: bold; color: #2C3E50; padding: 10px 20px; }
-    .stTabs [aria-selected="true"] { color: #27AE60; background-color: white; border-radius: 8px 8px 0 0; border-bottom: 3px solid #27AE60; }
-    div[data-testid="stBlock"] { background-color: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-    .eco-title { color: #27AE60; font-weight: 800; margin-bottom: 0px;}
-    .eco-subtitle { color: #7F8C8D; font-size: 1.1em; margin-top: 5px; margin-bottom: 20px;}
-    .markdown-text-container p, .markdown-text-container li { line-height: 1.6; margin-bottom: 8px; }
+    .main { background-color: #f8f9fa; }
+    .stTabs [data-baseweb="tab"] { font-size: 18px; font-weight: bold; color: #1565c0; }
+    .highlight-box { padding: 20px; border-radius: 12px; margin-bottom: 15px; border-left: 6px solid; color: #1e1e1e; line-height: 1.6; }
+    .correct-box { background-color: #e8f5e9; border-left-color: #2e7d32; }
+    .upgrade-box { background-color: #e3f2fd; border-left-color: #1565c0; }
+    .repo-card { background-color: #ffffff; padding: 20px; border-radius: 10px; border-left: 8px solid #e91e63; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     </style>
-    """, unsafe_allow_html=True)
+''', unsafe_allow_html=True)
 
-@st.cache_resource
-def init_connections():
+MY_API_KEY = "AQ.Ab8RN6J8RxtZraVKgu7Q_J1nXtoj3SuGqfTG_Z3XE4aE3EVOjg"
+try:
+    genai.configure(api_key=MY_API_KEY)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+except Exception as e:
+    model = None
+
+def init_gspread():
     try:
-        ai_client = genai.Client(api_key="AQ.Ab8RN6J8RxtZraVKgu7Q_J1nXtoj3SuGqfTG_Z3XE4aE3EVOjg")
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-        gs_client = gspread.authorize(creds)
-        
-        spreadsheet = gs_client.open_by_key("1Y0BlBZlLceKrEE1EbBHl-9RofU1X6y-nMRa7ErUIo-E")
-        sheet_main = spreadsheet.sheet1
-        sheet_wall = spreadsheet.worksheet("Community_Wall")
-        sheet_lib = spreadsheet.worksheet("Public_Library")
-        sheet_challenge = spreadsheet.worksheet("Weekly_Challenges")
-        
-        return ai_client, sheet_main, sheet_wall, sheet_lib, sheet_challenge
+        import gspread
+        from google.oauth2.service_account import Credentials
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            client = gspread.authorize(creds)
+            return client
     except Exception as e:
-        st.error(f"Lỗi kết nối cơ sở dữ liệu hoặc API: {e}")
-        return None, None, None, None, None
+        return None
+    return None
 
-ai_client, sheet, sheet_wall, sheet_lib, sheet_challenge = init_connections()
+if 'local_repo' not in st.session_state:
+    st.session_state['local_repo'] = [
+        {
+            "contributor": "Hệ thống AI (Mẫu chuẩn)", 
+            "level": "4. Level C1: Cao cấp (IELTS 7.0–8.0)", 
+            "score": "7.5", 
+            "topic": "Education", 
+            "sub_topic": "Online Learning",
+            "timestamp": "15/06/2026 08:30:00",
+            "essay": "In the modern era, online learning has emerged as a formidable alternative to traditional classroom education.\n\nWhile some argue that nothing can replace face-to-face interaction, I believe that virtual platforms offer flexibility and accessibility that are essential for today's learners.",
+            "feedback": "**A. Mở bài:** Sử dụng từ vựng học thuật tốt.\n\n**B. Thân bài:** Lập luận chặt chẽ.\n\n**C. Kết bài:** Thuyết phục."
+        }
+    ]
 
-if "plan_text" not in st.session_state: st.session_state.plan_text = ""
-if "tree_map_text" not in st.session_state: st.session_state.tree_map_text = ""
-if "current_topic" not in st.session_state: st.session_state.current_topic = ""
-if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "tutor_active" not in st.session_state: st.session_state.tutor_active = False
-if "chat_session" not in st.session_state: st.session_state.chat_session = None
+def load_repository():
+    return st.session_state['local_repo']
+
+def handle_save_repo(contributor, level, score, topic, sub_topic, essay, feedback):
+    current_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    new_item = {
+        "contributor": contributor, "level": level, "score": str(score),
+        "topic": topic, "sub_topic": sub_topic, "timestamp": current_time,
+        "essay": essay, "feedback": feedback
+    }
+    st.session_state['local_repo'].insert(0, new_item)
+    st.session_state['save_success'] = True
+
+def export_to_pdf(title, mode, outline_text, score, feedback, upgrades):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    story = []
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=22, spaceAfter=15, textColor='#1565c0')
+    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=14, spaceBefore=12, spaceAfter=6, textColor='#e91e63')
+    body_style = ParagraphStyle('BodyStyle', parent=styles['BodyText'], fontName='Helvetica', fontSize=10, leading=14, spaceAfter=8)
+    
+    story.append(Paragraph(f"AIEssayist Learning Report", title_style))
+    story.append(Paragraph(f"<b>Target Level:</b> {mode}", body_style))
+    story.append(Spacer(1, 15))
+    
+    if outline_text:
+        story.append(Paragraph("1. WRITING PLAN & VOCABULARY", h2_style))
+        story.append(Paragraph(outline_text.replace('\n', '<br/>'), body_style))
+        story.append(Spacer(1, 15))
+    
+    if score:
+        story.append(Paragraph("2. SCORE & DETAILED FEEDBACK", h2_style))
+        story.append(Paragraph(f"<b>Overall Score:</b> {score}", body_style))
+        story.append(Paragraph(feedback.replace('\n', '<br/>'), body_style))
+        story.append(Spacer(1, 15))
+        
+    if upgrades:
+        story.append(Paragraph("3. SENTENCE UPGRADES", h2_style))
+        for item in upgrades:
+            story.append(Paragraph(f"<b>Original:</b> {item.get('original', '')}", body_style))
+            story.append(Paragraph(f"<b>Reason:</b> {item.get('reason', '')}", body_style))
+            story.append(Paragraph(f"<b>Standard Fix:</b> {item.get('standard_fix', '')}", body_style))
+            story.append(Paragraph(f"<b>Advanced Upgrade:</b> {item.get('advanced_upgrade', '')}", body_style))
+            story.append(Paragraph("----------------------------------------------------------------", body_style))
+            
+    doc.build(story)
+    return buffer.getvalue()
+
+for key in ['outline_data', 'mindmap_data', 'res_data', 'current_essay', 'current_topic', 'save_success', 'save_duplicate']:
+    if key not in st.session_state:
+        st.session_state[key] = None
+
+bt = "`" * 3
 
 with st.sidebar:
-    st.image("https://cdn-icons-png.flaticon.com/512/3254/3254068.png", width=80)
-    st.markdown("### ⚙️ DNA Của Bạn")
-    st.caption("Thiết lập này sẽ đồng bộ toàn bộ trí tuệ AI trong hệ sinh thái theo đúng năng lực của bạn.")
+    st.title("🛡️ Trung tâm Điều khiển")
+    client_test = init_gspread()
+    if client_test:
+        st.success("✅ Đã kết nối Google Database")
+    else:
+        st.info("💡 Đang chạy chế độ AI Độc lập mượt mà")
+    st.write("---")
+    st.header("📸 Quét bài viết tay")
+    uploaded_file = st.file_uploader("Tải lên ảnh bài luận:", type=["png", "jpg", "jpeg"])
+    if uploaded_file:
+        st.image(uploaded_file, use_container_width=True)
+    ocr_button = st.button("🔍 Bắt đầu quét chữ")
+
+st.title("🚀 AIEssayist: Writing Ecosystem 2026")
+st.subheader("Hệ sinh thái Writing: Mindmap siêu lớn - Kho tham khảo chi tiết")
+st.write("---")
+
+col_left, col_right = st.columns([2, 3])
+
+with col_left:
+    st.header("📝 Nhập liệu")
+    mode = st.selectbox("🎯 TRÌNH ĐỘ MỤC TIÊU:", [
+        "1. Level A1–A2: Tiền cơ bản", "2. Level B1: Trung cấp thấp", "3. Level B2: Trung cấp trên",
+        "4. Level C1: Cao cấp", "5. Level C2: Thành thạo", "6. Học sinh giỏi Tỉnh", "10. HSG Quốc gia"
+    ])
+
+    with st.expander("💡 BƯỚC 1: LÊN Ý TƯỞNG", expanded=True):
+        writing_topic = st.text_area("Nhập chủ đề cụ thể (Ví dụ: Family, Online Learning):", placeholder="Ví dụ: Family...")
+        generate_suon = st.button("🚀 Tạo Sườn bài & Mindmap lớn")
     
-    global_level = st.selectbox(
-        "🎯 Định vị năng lực (Level):", 
-        [
-            "A1 (Beginner) - Viết câu đơn giản", 
-            "A2 (Elementary) - Viết đoạn ngắn", 
-            "B1 (Intermediate) - Mức độ cơ bản IELTS 4.0-5.0", 
-            "B2 (Upper-Intermediate) - Khá IELTS 5.5-6.5", 
-            "C1 (Advanced) - Chuyên sâu IELTS 7.0+",
-            "C2 (Proficient) - Bản xứ / Chuyên gia",
-            "SAT Writing - Hành văn học thuật Mỹ",
-            "Creative Content - Tự do / Sáng tạo"
+    st.write("---")
+    st.subheader("🤖 BƯỚC 2: CHẤM ĐIỂM")
+    if uploaded_file and ocr_button:
+        with st.spinner("🔄 Đang bóc tách nét chữ..."):
+            if model:
+                img = Image.open(uploaded_file)
+                response = model.generate_content(["OCR extract handwritten text accurately. Return only the text.", img])
+                st.session_state['ocr_text'] = response.text
+                st.success("Quét chữ thành công!")
+
+    essay_input = st.text_area("Dán bài luận vào đây:", value=st.session_state.get('ocr_text', ''), height=250)
+    analyze_button = st.button("📊 Bắt đầu Chấm điểm & Nâng cấp")
+
+if model and generate_suon and writing_topic:
+    st.session_state['current_topic'] = writing_topic
+    is_low_level = any(x in mode for x in ["1.","2.","3.","6.","7.","8."])
+    lang_instruction = "Giải thích chi tiết bằng TIẾNG VIỆT, các câu mẫu thì viết bằng TIẾNG ANH." if is_low_level else "Write EVERYTHING entirely in professional academic ENGLISH."
+    
+    with st.spinner("📋 AI đang soạn cấu trúc sườn bài..."):
+        p_outline_pure = f'''Create a detailed essay roadmap for topic: "{writing_topic}" targeting "{mode}". Requirements: {lang_instruction}
+        CRITICAL INSTRUCTION FOR VOCABULARY LIST: You MUST provide key words. For EACH word, you MUST include the English word, its Phonetic transcription (IPA) inside / /, and its Vietnamese meaning. Example: "- **Environment** /ɪnˈvaɪrənmənt/: Môi trường". Do NOT skip the phonetics.'''
+        try:
+            res_out = model.generate_content(p_outline_pure)
+            st.session_state['outline_data'] = res_out.text
+        except Exception as e:
+            st.error(f"Lỗi AI: {str(e)}")
+            
+    with st.spinner("🧠 Đang thiết kế Mindmap Siêu Lớn..."):
+        p_mindmap = f'''
+        Generate ONLY raw valid Graphviz DOT code for a mindmap about: "{writing_topic}". 
+        Strict rules: 
+        1. Start with "digraph G {{" and end with "}}". Do NOT use markdown code blocks. 
+        2. Keep node text short (1-3 words). 
+        3. CRITICAL STYLE: Use 'rankdir=LR; size="15,15"; ranksep=4.0; nodesep=2.0;'.
+        4. node [shape=box, style="filled,rounded", fillcolor="#e3f2fd", fontname="Arial-Bold", fontsize=70, penwidth=4, margin="0.8,0.4"]; edge [penwidth=4, color="#1565c0"];
+        5. Root node MUST be giant: root_node_name [fontsize=90, fillcolor="#ffcdd2", margin=1.0].
+        '''
+        try:
+            res_map = model.generate_content(p_mindmap)
+            raw_dot = res_map.text.strip()
+            if bt in raw_dot:
+                raw_dot = raw_dot.split(bt)[1].replace('dot', '').replace('graphviz', '').strip()
+            st.session_state['mindmap_data'] = raw_dot
+        except:
+            st.session_state['mindmap_data'] = None
+    st.rerun()
+
+if model and analyze_button and essay_input:
+    st.session_state['current_essay'] = essay_input
+    with st.spinner(f"🤖 Giám khảo AI đang thẩm định bài luận..."):
+        lang_rule = "Write 'feedback' and 'reason' in VIETNAMESE" if any(x in mode for x in ["1.","2.","3.","6.","7.","8."]) else "Write everything in ENGLISH"
+        p_an = f'''
+        Analyze essay: "{essay_input}" based on "{mode}". {lang_rule}.
+        Classify this essay into one general category: [Education, Technology, Environment, Health, Society, Economy, Media, Government, History].
+        Return strictly a JSON object with: 
+        "score": "Overall score string", 
+        "numeric_score": 7.0,
+        "topic_category": "Main Category (from the list)",
+        "feedback": "Detailed review with explicit architectural blocks: A. Mở bài, B. Thân bài, C. Kết bài.", 
+        "upgrades": [
+            {{
+                "original": "Original sentence", 
+                "reason": "Why it needs fix", 
+                "standard_fix": "Grammar fix (Basic Level)", 
+                "advanced_upgrade": "Advanced version"
+            }}
         ]
-    )
-    
-    global_focus = st.multiselect(
-        "🔍 Mục tiêu cải thiện chính:",
-        ["Từ vựng học thuật", "Ngữ pháp cốt lõi", "Sự mạch lạc (Coherence)", "Phát triển ý tưởng (Brainstorming)"],
-        default=["Từ vựng học thuật", "Ngữ pháp cốt lõi"]
-    )
-    
-    st.info(f"💡 **Smart Tip:** Hệ thống tự động ghi nhớ level **{global_level.split(' ')[0]}** để điều chỉnh độ khó.")
+        '''
+        try:
+            res_an = model.generate_content(p_an)
+            res_txt = res_an.text.strip()
+            if f'{bt}json' in res_txt: 
+                res_txt = res_txt.split(f'{bt}json')[1].split(bt)[0].strip()
+            elif bt in res_txt: 
+                res_txt = res_txt.split(bt)[1].split(bt)[0].strip()
+            st.session_state['res_data'] = json.loads(res_txt)
+        except Exception as e:
+            st.error(f"Lỗi phân tích cú pháp JSON: {str(e)}")
+    st.rerun()
 
-    st.markdown("---")
-    st.markdown("### 📖 Trạm Tra Cứu Nhanh")
-    st.caption("Dán từ/cụm từ/câu vào đây để AI phân tích nghĩa hoặc điểm ngữ pháp tức thì.")
-    lookup_text = st.text_area("🔍 Nhập văn bản cần tra:", height=100, key="quick_lookup")
+with col_right:
+    st.header("📊 Kết quả Trợ lý AI")
     
-    if st.button("Dịch & Phân Tích", width="stretch"):
-        if lookup_text and ai_client:
-            with st.spinner("Đang phân tích..."):
-                prompt_dict = f"""
-                Bạn là một chuyên gia ngôn ngữ học. Phân tích văn bản sau: "{lookup_text}".
-                - Nếu là 1 từ hoặc cụm từ ngắn: Cung cấp nghĩa Tiếng Việt, Phiên âm IPA, và 1 câu ví dụ minh họa bằng Tiếng Anh (kèm dịch nghĩa).
-                - Nếu là một câu dài hoặc đoạn văn: Dịch nghĩa toàn bộ sang Tiếng Việt. Sau đó bóc tách giải thích cấu trúc ngữ pháp chính hoặc các từ vựng khó trong câu đó.
-                Trình bày ngắn gọn, súc tích, dễ hiểu.
-                """
-                try:
-                    dict_res = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt_dict)
-                    st.success("Kết quả tra cứu:")
-                    st.markdown(dict_res.text)
-                except Exception as e:
-                    st.error(f"Lỗi: {e}")
+    if st.session_state['outline_data'] or st.session_state['res_data']:
+        st.subheader("📥 Xuất dữ liệu học tập")
+        bytes_data_pdf = export_to_pdf(
+            st.session_state.get('current_topic', 'My Essay'),
+            mode,
+            st.session_state.get('outline_data', ''),
+            st.session_state.get('res_data', {}).get('score', '') if st.session_state.get('res_data') else "",
+            st.session_state.get('res_data', {}).get('feedback', '') if st.session_state.get('res_data') else "",
+            st.session_state.get('res_data', {}).get('upgrades', []) if st.session_state.get('res_data') else []
+        )
+        st.download_button(
+            label="📥 TẢI HOÀN CHỈNH BÁO CÁO VỀ MÁY (FILE PDF)",
+            data=bytes_data_pdf,
+            file_name="AIEssayist_Report.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+        st.write("---")
 
-st.markdown("<h1 class='eco-title'>🌱 HỆ SINH THÁI WRITING THÔNG MINH</h1>", unsafe_allow_html=True)
-st.markdown("<p class='eco-subtitle'>Khởi tạo Ý Tưởng -> Luyện Tập Cùng AI -> Chấm Điểm & Tối Ưu -> Xây Dựng Thói Quen -> Lan Tỏa Cộng Đồng</p>", unsafe_allow_html=True)
-
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "💡 1. Trạm Khởi Tạo & Mindmap", 
-    "🏋️ 2. Phòng Luyện Tập AI",
-    "⚖️ 3. Xưởng Chấm Điểm & Tối Ưu", 
-    "📂 4. Hồ Sơ (Logs)",
-    "🌍 5. Rừng Cộng Đồng",
-    "📚 6. Kho Học Liệu"
-])
-
-with tab1:
-    col_t1_left, col_t1_right = st.columns([1.2, 1.8])
-    
-    with col_t1_left:
-        st.markdown(f"### 🗺️ Nhập hạt giống ý tưởng")
-        plan_topic = st.text_area("👉 Đưa cho tôi một chủ đề / Đề bài:", placeholder="Ví dụ: Lợi ích của việc đi du lịch...", height=100)
-        btn_plan = st.button("🚀 Kích hoạt phân tích ý tưởng", type="primary", width="stretch")
+    if st.session_state['res_data'] is not None:
+        res = st.session_state['res_data']
+        num_score = res.get('numeric_score', 0)
+        is_qualified = num_score >= 6.0
         
-        st.markdown("---")
-        if st.session_state.tree_map_text:
-            st.markdown("### 🧠 Sơ đồ Tư duy (Mindmap)")
-            st.caption("Bức tranh toàn cảnh giúp bạn không bao giờ bí ý tưởng. (Nhấn biểu tượng phóng to ở góc để xem rõ hơn)")
-            try:
-                # Đảm bảo Graphviz render theo chiều dọc
-                st.graphviz_chart(st.session_state.tree_map_text, width="stretch")
-            except Exception as e:
-                st.error("Sơ đồ đang gặp lỗi hiển thị. Bạn thử tạo lại nhé.")
-
-    with col_t1_right:
-        if btn_plan:
-            if not plan_topic or not ai_client: 
-                st.error("❌ Hệ sinh thái cần một hạt giống (chủ đề) để nảy mầm hoặc API chưa kết nối!")
-            else:
-                with st.spinner('Hệ thống đang thiết kế Bản đồ tư duy và Dàn ý bài viết...'):
-                    try:
-                        # 1. KHÔI PHỤC DÀN Ý + TỪ VỰNG + BÀI MẪU + THÊM NGỮ PHÁP
-                        prompt_plan = f"""
-                        Đóng vai trò là một chuyên gia ngôn ngữ học. Lập dàn ý và viết bài mẫu cho chủ đề: '{plan_topic}'.
-                        ĐÚNG TRÌNH ĐỘ: {global_level}.
-                        
-                        TRÌNH BÀY ĐÚNG 4 PHẦN SAU (Bắt buộc dùng Markdown, trình bày gọn gàng, Dùng <br> để xuống dòng trong danh sách nếu cần):
-                        
-                        PHẦN 1: DÀN Ý CHI TIẾT (Giải thích bằng tiếng Việt)
-                        - I. Mở bài
-                        - II. Thân bài (chia luận điểm rõ ràng)
-                        - III. Kết bài
-                        
-                        PHẦN 2: TỪ VỰNG THÔNG MINH (Bắt buộc tuân thủ đúng format)
-                        - **[Từ vựng Tiếng Anh]** /Phiên âm IPA/ : [Nghĩa Tiếng Việt]
-                          > Ví dụ: [Một câu ví dụ bằng Tiếng Anh chứa từ vựng đó]
-                          
-                        PHẦN 3: ĐIỂM NGỮ PHÁP QUAN TRỌNG (MỚI)
-                        - Đưa ra 1-2 cấu trúc ngữ pháp "ăn điểm" phù hợp với trình độ {global_level} nên dùng trong chủ đề này.
-                        - Giải thích cách dùng và cho 1 ví dụ.
-
-                        PHẦN 4: BÀI VĂN MẪU HOÀN CHỈNH
-                        - Viết một bài văn tiếng Anh hoàn chỉnh (đủ Mở, Thân, Kết).
-                        - Trình độ ngôn ngữ của bài viết phải tương xứng với {global_level}.
-                        """
-                        res_plan = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt_plan)
-                        st.session_state.plan_text = res_plan.text
-                        
-                        # 2. KHỐNG CHẾ MINDMAP DỌC & CỠ CHỮ 12 BẰNG TEMPLATE CỨNG
-                        prompt_mind = f"""
-                        Tạo một sơ đồ tư duy (mindmap) bằng ngôn ngữ DOT (Graphviz) cho chủ đề: '{plan_topic}'.
-                        QUY TẮC BẮT BUỘC:
-                        1. CHỈ xuất ra mã DOT hợp lệ. TUYỆT ĐỐI KHÔNG bọc trong các thẻ markdown như ```dot.
-                        2. BẠN PHẢI SỬ DỤNG CHÍNH XÁC TEMPLATE DƯỚI ĐÂY (chỉ thay thế text tiếng Việt).
-                        
-                        digraph G {{
-                           rankdir=TB; /* Ép buộc dọc */
-                           nodesep=0.4;
-                           ranksep=0.6;
-                           node [shape=box, style="filled,rounded", fontname="Arial", fontsize=12, margin="0.1,0.1"];
-                           edge [color="#27AE60", penwidth=1.5];
-                           
-                           "Chủ đề chính (ngắn gọn)" [fillcolor="#FFDDC1", fontsize=14, fontname="Arial Bold"];
-                           "MỞ BÀI" [fillcolor="#C1E1C1", fontname="Arial Bold"];
-                           "THÂN BÀI" [fillcolor="#AED9E0", fontname="Arial Bold"];
-                           "KẾT BÀI" [fillcolor="#FFC8A2", fontname="Arial Bold"];
-                           
-                           "Chủ đề chính (ngắn gọn)" -> "MỞ BÀI";
-                           "Chủ đề chính (ngắn gọn)" -> "THÂN BÀI";
-                           "Chủ đề chính (ngắn gọn)" -> "KẾT BÀI";
-                           
-                           /* BẠN HÃY THÊM CÁC Ý TƯỞNG CON DƯỚI ĐÂY (giữ text thật ngắn, tối đa 5 chữ) */
-                           "MỞ BÀI" -> "Ý mở bài 1";
-                           "THÂN BÀI" -> "Luận điểm 1";
-                           "THÂN BÀI" -> "Luận điểm 2";
-                           "KẾT BÀI" -> "Ý kết bài 1";
-                        }}
-                        """
-                        res_mind = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt_mind)
-                        raw_dot = res_mind.text.strip()
-                        if raw_dot.startswith('```'):
-                            raw_dot = re.sub(r'^```[a-zA-Z]*\n', '', raw_dot)
-                            raw_dot = re.sub(r'\n```$', '', raw_dot)
-
-                        st.session_state.tree_map_text = raw_dot
-                        st.session_state.current_topic = plan_topic
-                    except Exception as e: 
-                        st.error(f"Lỗi hệ sinh thái: {e}")
-        
-        if st.session_state.plan_text:
-            st.success(f"Dàn ý & Bài mẫu đã được tối ưu hóa cho: **{global_level}**")
-            # Bọc markdown trong một container có class riêng để nhận CSS line-height
-            st.markdown(f"<div class='markdown-text-container'>{st.session_state.plan_text}</div>", unsafe_allow_html=True)
-        elif not btn_plan:
-             st.info("👈 Nhập chủ đề bên trái và bấm nút để khởi tạo không gian ý tưởng.")
-
-with tab2:
-    st.markdown("### 🏋️ Phòng Luyện Tập AI: Gia sư 1 kèm 1")
-    st.caption(f"Gia sư đã được cấu hình cho trình độ: **{global_level}**. AI sẽ hướng dẫn từng bước, ra bài tập, chấm và yêu cầu bạn sửa đến khi chuẩn.")
-    
-    col_t2_1, col_t2_2 = st.columns([1, 2])
-    
-    with col_t2_1:
-        tutor_topic = st.text_input("📝 Đề tài luyện viết hôm nay:", value=st.session_state.current_topic)
-        
-        if st.button("🚀 BẬT PHÒNG LUYỆN TẬP", width="stretch", type="primary"):
-            if tutor_topic and ai_client:
-                st.session_state.tutor_active = True
-                st.session_state.chat_history = []
-                
-                system_prompt = f"""
-                Bạn là một Gia sư luyện viết (Writing Tutor) cực kỳ kiên nhẫn và chuyên nghiệp. 
-                Học viên đang ở trình độ MỤC TIÊU: {global_level}. Chủ đề hôm nay: "{tutor_topic}".
-                
-                QUY TRÌNH HƯỚNG DẪN 1 KÈM 1 (Rất quan trọng):
-                1. Chào mừng học viên và bẻ nhỏ bài viết (VD: Bắt đầu bằng việc viết 1 câu Introduction).
-                2. Gợi ý 1-2 từ vựng cấp độ {global_level.split(' ')[0]} phù hợp để viết câu đó.
-                3. YÊU CẦU học sinh TỰ VIẾT CÂU ĐÓ và gửi cho bạn. KHÔNG BAO GIỜ VIẾT HỘ HOÀN TOÀN.
-                4. Khi học sinh gửi câu: 
-                   - Nếu sai/yếu: Chỉ ra lỗi sai, giải thích vì sao, đưa ra CÂU MẪU SỬA LẠI, và yêu cầu học sinh viết lại câu khác tương tự.
-                   - Nếu đúng/hay: Khen ngợi và chuyển sang hướng dẫn bước tiếp theo (VD: Thân bài 1).
-                Hãy bắt đầu ngay lập tức bằng việc hướng dẫn bước 1!
-                """
-                
-                with st.spinner("Gia sư đang thiết lập phòng học..."):
-                    try:
-                        chat_session = ai_client.chats.create(model="gemini-2.5-flash", config={"system_instruction": system_prompt})
-                        st.session_state.chat_session = chat_session
-                        response = st.session_state.chat_session.send_message("Xin chào Gia sư, tôi đã sẵn sàng luyện viết từng câu.")
-                        st.session_state.chat_history.append({"role": "ai", "content": response.text})
-                    except Exception as e: st.error(f"Lỗi khởi động Gia sư: {e}")
-            else: st.warning("Vui lòng nhập chủ đề.")
+        st.markdown("### 📋 Trạng thái Đóng góp Kho tham khảo")
+        if is_qualified:
+            st.success(f"🎉 Bài viết đạt {num_score} điểm. Đủ điều kiện vinh danh!")
+            contributor = st.text_input("Tên người đóng góp bài viết:", value="Học sinh ẩn danh")
+            topic_detected = res.get('topic_category', 'Topic')
+            specific_topic = st.session_state.get('current_topic', '')
             
-        if st.button("🛑 KẾT THÚC BUỔI HỌC", width="stretch"):
-            st.session_state.tutor_active = False
-            st.session_state.chat_history = []
-            st.rerun()
-
-    with col_t2_2:
-        chat_box = st.container(height=450)
-        with chat_box:
-            if not st.session_state.tutor_active:
-                st.info("👈 Bấm 'Bật phòng luyện tập' để bắt đầu tương tác với Gia sư AI.")
-            else:
-                for msg in st.session_state.chat_history:
-                    with st.chat_message("user" if msg["role"] == "user" else "assistant"):
-                        st.markdown(msg["content"])
-        
-        if st.session_state.tutor_active:
-            user_msg = st.chat_input("✍️ Viết câu của bạn vào đây và nhấn Enter...")
-            if user_msg:
-                st.session_state.chat_history.append({"role": "user", "content": user_msg})
-                with chat_box:
-                    with st.chat_message("user"): st.markdown(user_msg)
-                    with st.chat_message("assistant"):
-                        with st.spinner("Gia sư đang đọc và chấm..."):
-                            try:
-                                reply = st.session_state.chat_session.send_message(user_msg)
-                                st.markdown(reply.text)
-                                st.session_state.chat_history.append({"role": "ai", "content": reply.text})
-                            except: st.error("Mất kết nối với Gia sư.")
-
-with tab3:
-    col_in, col_out = st.columns([1, 1])
-    with col_in:
-        st.markdown("### ⚖️ Xưởng Đánh Giá & Tối Ưu")
-        st.info(f"Hệ thống sẽ dùng tiêu chuẩn **{global_level}** để chấm điểm bài viết này.")
-        
-        topic_check = st.text_input("👉 Chủ đề (Topic):", value=st.session_state.current_topic, key="check_topic")
-        content_check = st.text_area("✍️ Nội dung bài viết hoàn chỉnh của bạn:", height=300, key="check_content")
-        
-        if st.button("✨ Phân Tích & Tối Ưu Hóa (Smart Check)", type="primary"):
-            if not topic_check or not content_check or not ai_client: st.error("❌ Vui lòng nhập nội dung và kiểm tra API!")
-            else:
-                with st.spinner('Siêu máy tính đang quét lỗi và tìm giải pháp tối ưu...'):
-                    try:
-                        prompt_grade = f"""
-                        Đóng vai trò là giám khảo chấm thi khắt khe cho trình độ {global_level}. 
-                        Đề bài: '{topic_check}'. Bài làm: '{content_check}'.
-                        Trả về cấu trúc RÕ RÀNG sau (Bằng tiếng Việt):
-                        1. 🎯 TRÌNH ĐỘ TỔNG QUÁT: [Điền mức Band/Điểm tương đương]
-                        2. 📊 ĐÁNH GIÁ CHI TIẾT: (Nhận xét về Ngữ pháp, Từ vựng, Mạch lạc)
-                        3. 🛠️ SMART UPGRADE (Tối ưu hóa): Trích xuất 2-3 câu viết kém/sai nhất trong bài, chỉ ra lỗi, và đưa ra CÂU MẪU ĐÃ ĐƯỢC VIẾT LẠI (Viết lại theo đúng chuẩn học thuật {global_level}).
-                        """
-                        response = ai_client.models.generate_content(model='gemini-2.5-flash', contents=prompt_grade)
-                        full_feedback = response.text
-                        
-                        level = "Chưa rõ"
-                        for line in full_feedback.split('\n'):
-                            if "TRÌNH ĐỘ TỔNG QUÁT" in line:
-                                level = line.replace("1. TRÌNH ĐỘ TỔNG QUÁT:", "").replace("🎯", "").strip()
-                                break
-                                
-                        if sheet:
-                            sheet.append_row([datetime.now().strftime("%Y-%m-%d %H:%M"), topic_check, global_level, content_check, level, full_feedback, "Optimized"])
-                        
-                        with col_out:
-                            st.success(f"Thẩm định thành công. Đạt ngưỡng: **{level}**")
-                            st.markdown(full_feedback)
-                    except Exception as e: st.error(f"Lỗi: {e}")
-
-with tab4:
-    st.header("📂 Hồ Sơ Thói Quen Viết Lách")
-    st.write("Lưu trữ toàn bộ các bài viết bạn đã nhờ AI chấm điểm tại 'Xưởng Đánh Giá'.")
-    if st.button("🔄 Đồng bộ dữ liệu đám mây"): st.cache_data.clear()
-    try:
-        if sheet:
-            all_rows = sheet.get_all_values()
-            if len(all_rows) > 1:
-                df = pd.DataFrame(all_rows[1:], columns=["Timestamp", "Topic", "Target Level", "Content", "Achieved Level", "Feedback", "Status"]).iloc[::-1]
-                st.dataframe(df[['Timestamp', 'Topic', 'Target Level', 'Achieved Level']], width="stretch")
-                
-                df['Select_Label'] = df['Timestamp'] + " - " + df['Topic']
-                sel_label = st.selectbox("📖 Mở lại hồ sơ cũ:", df['Select_Label'].tolist())
-                if sel_label:
-                    row = df[df['Select_Label'] == sel_label].iloc[0]
-                    st.markdown(f"### 📌 {row['Topic']} (Mục tiêu: {row['Target Level']})")
-                    st.code(row['Content'], language='text')
-                    st.info(row['Feedback'])
+            if st.session_state.get('save_success'):
+                st.success("✅ Đã đưa bài viết vào kho thành công!")
+                st.session_state['save_success'] = False
+            
+            st.button("📌 XÁC NHẬN LƯU BÀI VIẾT VÀO KHO", 
+                      on_click=handle_save_repo, 
+                      args=(contributor, mode, res.get('score', 'N/A'), topic_detected, specific_topic, st.session_state['current_essay'], res.get('feedback', '')))
         else:
-             st.warning("Google Sheets chưa được kết nối.")
-    except Exception as e: st.info(f"Chưa ghi nhận dữ liệu lịch sử hoặc lỗi: {e}")
+            st.warning(f"⚠️ Yêu cầu bài viết đạt từ 6.0 trở lên để lưu vào kho cộng đồng.")
+        st.write("---")
 
-with tab5:
-    st.header("🌍 Sinh Thái Học Hỏi Cộng Đồng")
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["🏛️ Peer Review (Ẩn Danh)", "📚 Nguồn Tài Nguyên Chung", "🏆 Đấu Trường Hằng Tuần"])
+    tab1, tab2, tab3, tab4 = st.tabs(["💡 Kế hoạch viết", "💯 Chấm điểm bài", "🚀 Nâng cấp câu", "📚 KHO THAM KHẢO"])
+
+    with tab1:
+        if st.session_state['outline_data'] is not None:
+            st.markdown(st.session_state['outline_data'])
+            if st.session_state['mindmap_data']:
+                st.write("---")
+                st.subheader("🧠 Sơ đồ tư duy trực quan (Mindmap Cực Lớn)")
+                st.graphviz_chart(st.session_state['mindmap_data'], use_container_width=True)
+        else:
+            st.info("Hãy tạo sườn bài để nhận cẩm nang viết.")
+
+    with tab2:
+        if st.session_state['res_data'] is not None:
+            res = st.session_state['res_data']
+            st.metric(f"🏆 ĐIỂM TỔNG KẾT ({mode})", str(res["score"]))
+            st.markdown(res.get('feedback', '').replace('\n', '\n\n'))
+        else:
+            st.info("Vui lòng dán bài luận ở khối bên trái và nhấn chấm điểm.")
     
-    with sub_tab1:
-        col_w1, col_w2 = st.columns([1, 1])
-        with col_w1:
-            st.markdown("### 📝 Xin góp ý ẩn danh")
-            post_topic = st.text_input("📌 Tiêu đề chia sẻ:")
-            post_essay = st.text_area("✍️ Nội dung cần review:", height=150)
-            if st.button("📤 Gieo mầm lên bảng tin"):
-                if post_topic and post_essay and sheet_wall:
-                    sheet_wall.append_row([datetime.now().strftime("%Y-%m-%d %H:%M"), f"POST_{datetime.now().strftime('%M%S')}", post_topic, post_essay, "Chưa có comment"])
-                    st.success("✅ Đã gieo mầm thành thành công!")
-                else: st.error("❌ Nhập đủ thông tin hoặc lỗi kết nối!")
-                
-        with col_w2:
-            st.markdown("### 💬 Mạng lưới tương tác")
-            try:
-                if sheet_wall:
-                    wall_rows = sheet_wall.get_all_values()
-                    if len(wall_rows) > 1:
-                        wall_df = pd.DataFrame(wall_rows[1:], columns=["Time", "ID", "Topic", "Content", "Comments"])
-                        for _, row in wall_df.iloc[::-1].iterrows():
-                            with st.expander(f"📌 {row['Topic']}"):
-                                st.code(row['Content'], language="text")
-                                st.caption(f"💬 Phản hồi: {row['Comments']}")
-                                new_cmt = st.text_input("Để lại hạt giống góp ý:", key=f"in_{row['ID']}")
-                                if st.button("Gửi góp ý", key=f"btn_{row['ID']}"):
-                                    cell = sheet_wall.find(row['ID'])
-                                    sheet_wall.update_cell(cell.row, 5, row['Comments'] + f" | [Góp ý]: {new_cmt}")
-                                    st.success("✅ Đã gửi!")
-                    else: st.info("Bảng tin trống.")
-            except: pass
+    with tab3:
+        if st.session_state['res_data'] is not None:
+            st.subheader(f"🚀 Lộ trình nâng cấp bài viết ({mode})")
+            for item in st.session_state['res_data'].get('upgrades', []):
+                st.write(f"**❌ Gốc:** *{item.get('original', '')}*")
+                st.info(f"💡 **Lý do:** {item.get('reason', '')}")
+                st.markdown(f'<div class="highlight-box correct-box">🟢 **Sửa đúng:**<br>{item.get("standard_fix", "")}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="highlight-box upgrade-box">🔥 **Nâng cấp:**<br><strong>{item.get("advanced_upgrade", "")}</strong></div>', unsafe_allow_html=True)
+                st.write("---")
+        else:
+            st.info("Vui lòng chấm điểm để nhận các gợi ý nâng cấp câu văn.")
 
-    with sub_tab2:
-        st.markdown("### 📚 Thư Viện Cấu Trúc Hay (Đóng góp chung)")
-        col_l1, col_l2 = st.columns([1, 1])
-        with col_l1:
-            new_struct = st.text_input("💡 Cấu trúc câu / Từ vựng:")
-            struct_note = st.text_input("💡 Ứng dụng cho level nào / Ý nghĩa:")
-            if st.button("🔒 Đóng góp vào Sinh thái"):
-                if new_struct and struct_note and sheet_lib:
-                    sheet_lib.append_row([datetime.now().strftime("%Y-%m-%d"), new_struct, struct_note])
-                    st.success("✅ Đóng góp thành công!")
-        with col_l2:
-            try:
-                if sheet_lib:
-                    lib_rows = sheet_lib.get_all_values()
-                    if len(lib_rows) > 1:
-                        lib_df = pd.DataFrame(lib_rows[1:], columns=["Date", "Structure", "Note"])
-                        st.dataframe(lib_df[["Structure", "Note"]], width="stretch")
-            except: pass
-
-    with sub_tab3:
-        st.info("🔥 **THỬ THÁCH TUẦN NÀY:** Viết 150 từ: 'The impact of AI on smart ecosystems'.")
-        col_g1, col_g2 = st.columns([1, 1])
-        with col_g1:
-            user_name = st.text_input("Bí danh bảng xếp hạng:")
-            challenge_essay = st.text_area("✍️ Bài dự thi:", height=150)
-            if st.button("🏅 Nộp bài & Chấm AI"):
-                if user_name and challenge_essay and ai_client and sheet_challenge:
-                    with st.spinner("AI chấm điểm xếp hạng..."):
-                        res_c = ai_client.models.generate_content(model='gemini-2.5-flash', contents=f"Chấm khắt khe văn bản sau lấy điểm từ 1-100. Format: ĐIỂM SỐ TỔNG: [Số]. Nhận xét 1 câu. Bài: {challenge_essay}")
-                        score = "70"
-                        for line in res_c.text.split('\n'):
-                            if "ĐIỂM SỐ TỔNG" in line:
-                                score = "".join(filter(str.isdigit, line))
-                                break
-                        sheet_challenge.append_row([datetime.now().strftime("%Y-%m-%d"), user_name, score, challenge_essay])
-                        st.success(f"🎉 Hoàn thành! Điểm: {score}/100")
-        with col_g2:
-            try:
-                if sheet_challenge:
-                    c_rows = sheet_challenge.get_all_values()
-                    if len(c_rows) > 1:
-                        c_df = pd.DataFrame(c_rows[1:], columns=["Date", "Name", "Score", "Essay"])
-                        c_df["Score"] = pd.to_numeric(c_df["Score"])
-                        st.dataframe(c_df.sort_values(by="Score", ascending=False).reset_index(drop=True)[["Name", "Score"]], width="stretch")
-            except: pass
-
-with tab6:
-    st.header("📚 Kho Học Liệu & Công Cụ Hỗ Trợ Viết")
-    st.markdown("Hệ thống tổng hợp các nguồn tài nguyên uy tín giúp bạn liên tục nạp 'đầu vào' (input) chất lượng để nâng cao kỹ năng viết mỗi ngày.")
-
-    col_res1, col_res2 = st.columns(2)
-    with col_res1:
-        with st.expander("🔗 1. Công Cụ Hỗ Trợ Chuyên Sâu (Tools)", expanded=True):
-            st.markdown("""
-            - **[Ozdic (Collocation Dictionary)](https://ozdic.com/):** Từ điển tra cứu các cụm từ đi chung với nhau tự nhiên nhất (Cực kỳ quan trọng để nâng band IELTS/SAT).
-            - **[Grammarly](https://www.grammarly.com/):** Tiện ích mở rộng kiểm tra lỗi chính tả và ngữ pháp cơ bản khi gõ phím.
-            - **[QuillBot](https://quillbot.com/):** Công cụ paraphrase (viết lại câu) hữu ích để đa dạng hóa vốn từ.
-            - **[Thesaurus](https://www.thesaurus.com/):** Từ điển từ đồng nghĩa/trái nghĩa giúp tránh lặp từ.
-            """)
-
-        with st.expander("📖 2. Nguồn Đọc Học Thuật (Reading for Writing)"):
-            st.markdown("""
-            *Để viết tốt, bạn cần đọc nhiều văn bản chuẩn mực để thấm văn phong.*
-            - **[BBC News](https://www.bbc.com/news) / [The Guardian](https://www.theguardian.com/):** Nguồn bài báo tin tức chuẩn mực ngữ pháp Anh.
-            - **[National Geographic](https://www.nationalgeographic.com/):** Chứa nhiều từ vựng miêu tả tự nhiên, môi trường, xã hội cực tốt.
-            - **[TED Talks (Transcripts)](https://www.ted.com/):** Đọc bản ghi lời thoại để học cách lập luận, thuyết trình và phát triển ý tưởng đa chiều.
-            - **[Aeon Essays](https://aeon.co/):** Các bài luận triết học, xã hội học chuyên sâu (Dành cho trình độ C1/C2).
-            """)
-            
-    with col_res2:
-        with st.expander("📘 3. Sách & Tài Liệu Khuyên Dùng"):
-            st.markdown("""
-            - **Vocabulary for IELTS Advanced (Cambridge):** Sách nạp từ vựng kinh điển theo từng chủ đề.
-            - **On Writing Well (William Zinsser):** Cuốn sách nổi tiếng dành cho những ai muốn hành văn rõ ràng, mạch lạc, bớt sáo rỗng.
-            - **The Elements of Style (Strunk & White):** Cuốn sách gối đầu giường về ngữ pháp và văn phong tiếng Anh chuẩn mực.
-            - **IELTS Simon's Essay Guides:** Bộ tổng hợp các bài mẫu của cựu giám khảo Simon - Đơn giản nhưng đạt band cao.
-            """)
-            
-        with st.expander("🧠 4. Kỹ Năng Tư Duy Viết (Mindset)"):
-            st.markdown("""
-            - **PEEL Method:** Cấu trúc tiêu chuẩn cho 1 đoạn văn: **P**oint (Ý chính) - **E**vidence (Bằng chứng) - **E**xplain (Giải thích) - **L**ink (Liên kết).
-            - **Mind Mapping:** Luôn vẽ sơ đồ tư duy trước khi viết để không lạc đề (Hãy dùng Tab 1 của Hệ sinh thái này).
-            - **Free Writing (Viết tự do):** Dành 5 phút mỗi ngày đặt bút viết liên tục bất cứ thứ gì trong đầu mà không sửa lỗi. Phương pháp này giúp phá vỡ "Writer's Block" (Hội chứng bí ý tưởng).
-            """)
-
-st.markdown("---")
-st.markdown("<p style='text-align: center; color: #7F8C8D;'>🌱 AIEssayist v8.1 - A Smart Writing Ecosystem powered by Gemini & Streamlit</p>", unsafe_allow_html=True)
+    with tab4:
+        st.subheader("📁 Tuyển tập bài luận xuất sắc")
+        repo_data = load_repository()
+        for idx, item in enumerate(repo_data):
+            st.markdown(f"""
+            <div class="repo-card">
+                <h3 style="color:#1565c0; margin:0;">📝 Bài mẫu #{idx+1}: Chủ đề {item['topic']}</h3>
+                <p style="margin:5px 0;">👤 <b>Tác giả:</b> {item['contributor']} | 🎯 <b>Level:</b> {item['level']}</p>
+                <p style="margin:0;">🏆 <b>Điểm:</b> <span style="color:#2e7d32; font-weight:bold;">{item['score']}</span></p>
+            </div>
+            """, unsafe_allow_html=True)
+            with st.expander("👁️ Xem chi tiết nội dung"):
+                st.info(item['essay'])
+                st.write("**Nhận xét của AI:**")
+                st.write(item['feedback'])
+            st.write("---")
