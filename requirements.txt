@@ -1,6 +1,6 @@
-streamlit
-google-genai
+﻿streamlit
+google-generativeai
+pillow
+reportlab
 gspread
-oauth2client
-pandas
-graphviz
+google-auth
