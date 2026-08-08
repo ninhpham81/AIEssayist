@@ -8,7 +8,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
 st.set_page_config(
-    page_title="HỆ SINH THÁI WRITING THÔNG MINH",
+    page_title="AIEssayist Pro v8.1 Ecosystem",
     page_icon="🌱",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -40,9 +40,9 @@ def init_connections():
     try:
         os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
-        # 🚀 1. KẾT NỐI GEMINI API
-        api_key = "AQ.Ab8RN6LKQBwVMAgVb6pSA4__hMeZ3-j5m63ZCrvAA28_kh83_Q"
-        ai_client = genai.Client(api_key=api_key)
+        # 🚀 1. KẾT NỐI GEMINI API (Sử dụng biến môi trường cho khóa AQ...)
+        os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6L9b0ydiYU0ZIZ8EWSt4wtSjY0IcloWVD6_KMnPXB7S8A"
+        ai_client = genai.Client()
 
         # 🚀 2. KẾT NỐI GOOGLE SHEETS
         scope_sheets = [
@@ -80,7 +80,7 @@ if "tutor_system_prompt" not in st.session_state: st.session_state.tutor_system_
 if "local_challenges" not in st.session_state:
     st.session_state.local_challenges = [
         {"Thời gian": "2026-08-07 15:30", "Họ và tên": "Minh Anh", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 92, "Trình độ đạt được": "B2", "Nhận xét AI": "Bài viết xuất sắc, lập luận chặt chẽ, bám sát chủ đề hệ sinh thái thông minh.", "Nội dung bài làm": "Artificial intelligence plays a transformative role in shaping smart ecosystems today. By automating resource management with unprecedented precision, smart systems optimize energy consumption. For instance, smart grids leverage predictive algorithms to balance power supply and demand dynamically, significantly reducing waste and carbon footprints."},
-        {"Thời gian": "2026-08-07 16:10", "Họ and tên": "Gia Hân", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 85, "Trình độ đạt được": "B1", "Nhận xét AI": "Bài viết tốt, từ vựng phong phú, cấu trúc mạch lạc.", "Nội dung bài làm": "AI is very important for smart ecosystems. It helps us save energy and protect the environment. Smart devices can learn from human habits and make our lives much more convenient and sustainable."}
+        {"Thời gian": "2026-08-07 16:10", "Họ và tên": "Gia Hân", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 85, "Trình độ đạt được": "B1", "Nhận xét AI": "Bài viết tốt, từ vựng phong phú, cấu trúc mạch lạc.", "Nội dung bài làm": "AI is very important for smart ecosystems. It helps us save energy and protect the environment. Smart devices can learn from human habits and make our lives much more convenient and sustainable."}
     ]
 
 with st.sidebar:
@@ -115,11 +115,12 @@ with st.sidebar:
     st.caption("Phân tích chi tiết từ, câu hoặc văn bản: Nghĩa, Ngữ pháp, Collocations & Từ loại.")
     lookup_text = st.text_area("🔍 Nhập từ/câu/văn bản cần tra cứu:", height=100, key="quick_lookup")
 
-    if st.button("Phân Tích Chuyên Sâu", use_container_width=True):
+    if st.button("Dịch & Phân Tích", use_container_width=True):
         if lookup_text and ai_client:
             with st.spinner("Đang phân tích ngữ pháp, nghĩa và collocation..."):
                 prompt_dict = f"""
-                Bạn là Chuyên gia Ngôn ngữ học và Từ vựng học. Hãy phân tích cực kỳ chi tiết cho văn bản/cụm từ/từ sau: "{lookup_text}".
+                Đóng vai trò là một từ điển Anh-Việt cao cấp chuyên dành cho người học thuật và giao tiếp. 
+                Hãy giải nghĩa chi tiết cho văn bản/cụm từ/từ sau: "{lookup_text}".
                 
                 Trình bày theo định dạng Markdown rõ ràng gồm các mục:
                 1. **Phân tích nghĩa & Ngữ cảnh:** (Nghĩa chính, sắc thái biểu cảm)
@@ -148,7 +149,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: KHỞI TẠO & SƠ ĐỒ MINDMAP
+# TAB 1: KHỞI TẠO & SƠ ĐỒ MINDMAP (TÍCH HỢP ZOOM +/- VÀ FULLSCREEN HOẠT ĐỘNG HOÀN HẢO)
 # ==========================================
 with tab1:
     col_t1_left, col_t1_right = st.columns([1.2, 1.8])
@@ -160,12 +161,87 @@ with tab1:
         st.markdown("---")
         if st.session_state.tree_map_text:
             st.markdown("### 🧠 Sơ đồ Khối (Mindmap)")
-            st.caption("Cấu trúc trực quan gọn gàng vừa vặn khung trái")
+            st.caption("Dùng nút [+] [-] để phóng to/thu nhỏ hoặc nhấn [⛶] để xem toàn màn hình")
+            
+            import graphviz
             try:
-                st.graphviz_chart(st.session_state.tree_map_text, use_container_width=True)
+                dot_code = st.session_state.tree_map_text
+                svg_data = graphviz.Source(dot_code).pipe(format='svg').decode('utf-8')
+                
+                zoom_fullscreen_html = """
+                <div id="mindmap-container" style="position: relative; width: 100%; height: 450px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; overflow: auto; display: flex; align-items: center; justify-content: center;">
+                    <!-- Thanh công cụ Zoom & Fullscreen -->
+                    <div style="position: absolute; top: 12px; right: 12px; z-index: 9999; background: rgba(255, 255, 255, 0.95); border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); display: flex; gap: 6px; padding: 6px;">
+                        <button onclick="zoomIn()" title="Phóng to (+)" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; width: 34px; height: 34px; font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #333;">+</button>
+                        <button onclick="zoomOut()" title="Thu nhỏ (-)" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; width: 34px; height: 34px; font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #333;">-</button>
+                        <button onclick="resetZoom()" title="Đặt lại" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; padding: 0 10px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #333;">Reset</button>
+                        <button onclick="toggleFullscreen()" title="Toàn màn hình" style="background: #27AE60; color: white; border: none; border-radius: 4px; width: 34px; height: 34px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;">⛶</button>
+                    </div>
+                    <!-- Vùng chứa SVG được scale -->
+                    <div id="svg-wrapper" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transform-origin: center center; transition: transform 0.15s ease;">
+                        REPLACE_SVG_HERE
+                    </div>
+                </div>
+
+                <script>
+                    let currentScale = 1.0;
+                    const wrapper = document.getElementById('svg-wrapper');
+                    const container = document.getElementById('mindmap-container');
+
+                    function zoomIn() {
+                        currentScale += 0.25;
+                        wrapper.style.transform = 'scale(' + currentScale + ')';
+                    }
+
+                    function zoomOut() {
+                        if (currentScale > 0.4) {
+                            currentScale -= 0.25;
+                            wrapper.style.transform = 'scale(' + currentScale + ')';
+                        }
+                    }
+
+                    function resetZoom() {
+                        currentScale = 1.0;
+                        wrapper.style.transform = 'scale(' + currentScale + ')';
+                    }
+
+                    function toggleFullscreen() {
+                        if (!document.fullscreenElement) {
+                            if (container.requestFullscreen) {
+                                container.requestFullscreen();
+                            } else if (container.webkitRequestFullscreen) {
+                                container.webkitRequestFullscreen();
+                            } else if (container.msRequestFullscreen) {
+                                container.msRequestFullscreen();
+                            }
+                        } else {
+                            if (document.exitFullscreen) {
+                                document.exitFullscreen();
+                            } else if (container.webkitExitFullscreen) {
+                                container.webkitExitFullscreen();
+                            } else if (container.msExitFullscreen) {
+                                container.msExitFullscreen();
+                            }
+                        }
+                    }
+
+                    const svgEl = wrapper.querySelector('svg');
+                    if (svgEl) {
+                        svgEl.style.width = '100%';
+                        svgEl.style.height = '100%';
+                        svgEl.style.maxWidth = 'none';
+                        svgEl.style.maxHeight = 'none';
+                    }
+                </script>
+                """
+                zoom_fullscreen_html = zoom_fullscreen_html.replace("REPLACE_SVG_HERE", svg_data)
+                st.components.v1.html(zoom_fullscreen_html, height=460)
             except Exception as e:
-                st.warning("Không thể hiển thị đồ họa sơ đồ. Mã sơ đồ chi tiết:")
-                st.code(st.session_state.tree_map_text, language="dot")
+                try:
+                    st.graphviz_chart(st.session_state.tree_map_text, use_container_width=True)
+                except Exception as ex:
+                    st.warning("Không thể hiển thị đồ họa sơ đồ. Mã sơ đồ chi tiết:")
+                    st.code(st.session_state.tree_map_text, language="dot")
 
     with col_t1_right:
         if btn_plan:
@@ -203,7 +279,7 @@ with tab1:
                            graph [fontname="Segoe UI", fontsize=10, nodesep=0.25, ranksep=0.4];
                            node [shape=box, style="filled,rounded", fontname="Segoe UI", fontsize=11, margin="0.2,0.15"];
                            edge [fontname="Segoe UI", fontsize=9, penwidth=1.2];
-                        3. Cỡ chữ nhỏ gọn (12px cho node), khung hộp vừa vặn sát chữ.
+                        3. Cỡ chữ nhỏ gọn (11px cho node), khung hộp vừa vặn sát chữ.
                         4. Phối màu (fillcolor) sinh động, phân cấp rõ ràng (Node gốc, Mở/Thân/Kết, Ý chi tiết).
                         5. TUYỆT ĐỐI CHỈ XUẤT MÃ DOT THUẦN TÚY (từ 'digraph G {{' đến '}}'). Không bọc trong Markdown code blocks.
                         """
@@ -531,7 +607,6 @@ with tab5:
                             if "NHẬN XÉT" in line:
                                 feedback_comment = line.replace("NHẬN XÉT:", "").strip()
 
-                        # Nếu lạc đề, trừ 50% điểm số và ghi chú rõ ràng vào nhận xét
                         if is_off_topic == "Có":
                             score = int(score * 0.5)
                             feedback_comment = f"⚠️ [LẠC ĐỀ - BỊ TRỪ 50% ĐIỂM] {feedback_comment}"
@@ -591,7 +666,6 @@ with tab5:
                     c_df = c_df.sort_values(by="Điểm số_num", ascending=False).reset_index(drop=True)
                     c_df["Xếp hạng"] = [f"Top {i+1} 🥇" if i==0 else (f"Top {i+1} 🥈" if i==1 else (f"Top {i+1} 🥉" if i==2 else f"Top {i+1}")) for i in range(len(c_df))]
                     
-                    # Bảng hiển thị đúng 5 cột: Thời gian, Họ và tên, Chủ đề thử thách, Điểm số, Xếp hạng
                     display_df = c_df[["Thời gian", "Họ và tên", "Chủ đề thử thách", "Điểm số", "Xếp hạng"]]
                     st.dataframe(display_df, use_container_width=True)
                     
