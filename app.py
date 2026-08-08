@@ -40,8 +40,12 @@ def init_connections():
     try:
         os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
 
-        # 🚀 1. KẾT NỐI GEMINI API (Sử dụng biến môi trường cho khóa AQ...)
-        os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6L9b0ydiYU0ZIZ8EWSt4wtSjY0IcloWVD6_KMnPXB7S8A"
+        # 🚀 1. KẾT NỐI GEMINI API
+        if "GEMINI_API_KEY" in st.secrets:
+            os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+        else:
+            os.environ["GEMINI_API_KEY"] = "AQ.Ab8RN6L9b0ydiYU0ZIZ8EWSt4wtSjY0IcloWVD6_KMnPXB7S8A"
+        
         ai_client = genai.Client()
 
         # 🚀 2. KẾT NỐI GOOGLE SHEETS
@@ -49,20 +53,34 @@ def init_connections():
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive",
         ]
-        creds_sheets = ServiceAccountCredentials.from_json_keyfile_name(
-            "credentials.json", scope_sheets
-        )
-        gs_client = gspread.authorize(creds_sheets)
-
-        spreadsheet = gs_client.open_by_key("1Y0BlBZlLceKrEE1EbBHl-9RofU1X6y-nMRa7ErUIo-E")
-        sheet_main = spreadsheet.sheet1
         
-        try: sheet_wall = spreadsheet.worksheet("Community_Wall")
-        except: sheet_wall = None
-        try: sheet_lib = spreadsheet.worksheet("Public_Library")
-        except: sheet_lib = None
-        try: sheet_challenge = spreadsheet.worksheet("Weekly_Challenges")
-        except: sheet_challenge = None
+        # Kiểm tra chạy ở Local hay trên Streamlit Cloud
+        if os.path.exists("credentials.json"):
+            creds_sheets = ServiceAccountCredentials.from_json_keyfile_name(
+                "credentials.json", scope_sheets
+            )
+        elif "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds_sheets = ServiceAccountCredentials.from_json_keyfile_dict(
+                creds_dict, scope_sheets
+            )
+        else:
+            # Nếu chạy trên Cloud mà chưa thiết lập Secrets cho Google Sheets thì bỏ qua kết nối Sheets
+            creds_sheets = None
+
+        sheet_main, sheet_wall, sheet_lib, sheet_challenge = None, None, None, None
+        
+        if creds_sheets:
+            gs_client = gspread.authorize(creds_sheets)
+            spreadsheet = gs_client.open_by_key("1Y0BlBZlLceKrEE1EbBHl-9RofU1X6y-nMRa7ErUIo-E")
+            sheet_main = spreadsheet.sheet1
+            
+            try: sheet_wall = spreadsheet.worksheet("Community_Wall")
+            except: sheet_wall = None
+            try: sheet_lib = spreadsheet.worksheet("Public_Library")
+            except: sheet_lib = None
+            try: sheet_challenge = spreadsheet.worksheet("Weekly_Challenges")
+            except: sheet_challenge = None
 
         return ai_client, sheet_main, sheet_wall, sheet_lib, sheet_challenge
     except Exception as e:
@@ -79,8 +97,8 @@ if "tutor_active" not in st.session_state: st.session_state.tutor_active = False
 if "tutor_system_prompt" not in st.session_state: st.session_state.tutor_system_prompt = ""
 if "local_challenges" not in st.session_state:
     st.session_state.local_challenges = [
-        {"Thời gian": "2026-08-07 15:30", "Họ và tên": "Minh Anh", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 92, "Trình độ đạt được": "B2", "Nhận xét AI": "Bài viết xuất sắc, lập luận chặt chẽ, bám sát chủ đề hệ sinh thái thông minh.", "Nội dung bài làm": "Artificial intelligence plays a transformative role in shaping smart ecosystems today. By automating resource management with unprecedented precision, smart systems optimize energy consumption. For instance, smart grids leverage predictive algorithms to balance power supply and demand dynamically, significantly reducing waste and carbon footprints."},
-        {"Thời gian": "2026-08-07 16:10", "Họ và tên": "Gia Hân", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 85, "Trình độ đạt được": "B1", "Nhận xét AI": "Bài viết tốt, từ vựng phong phú, cấu trúc mạch lạc.", "Nội dung bài làm": "AI is very important for smart ecosystems. It helps us save energy and protect the environment. Smart devices can learn from human habits and make our lives much more convenient and sustainable."}
+        {"Thời gian": "2026-08-07 15:30", "Họ và tên": "Minh Anh", "Bảng đấu": "Bảng B1 - B2", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 92, "Trình độ đạt được": "B2", "Nhận xét AI": "🌟 Điểm sáng: Lập luận chặt chẽ, sử dụng collocations tự nhiên.\n🛠️ Góp ý cải thiện: Chú ý mở rộng thêm ví dụ thực tế.\n🚀 Gợi ý nâng cấp: Smart grids leverage predictive algorithms to balance power supply dynamically.", "Nội dung bài làm": "Artificial intelligence plays a transformative role in shaping smart ecosystems today. By automating resource management with unprecedented precision, smart systems optimize energy consumption."},
+        {"Thời gian": "2026-08-07 16:10", "Họ và tên": "Gia Hân", "Bảng đấu": "Bảng B1 - B2", "Chủ đề thử thách": "The impact of AI on smart ecosystems", "Điểm số": 85, "Trình độ đạt được": "B1", "Nhận xét AI": "🌟 Điểm sáng: Từ vựng phong phú, cấu trúc mạch lạc.\n🛠️ Góp ý cải thiện: Cần bổ sung từ nối giữa các đoạn.\n🚀 Gợi ý nâng cấp: AI connects various smart devices to make our daily lives more sustainable.", "Nội dung bài làm": "AI is very important for smart ecosystems. It helps us save energy and protect the environment. Smart devices can learn from human habits."}
     ]
 
 with st.sidebar:
@@ -149,7 +167,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: KHỞI TẠO & SƠ ĐỒ MINDMAP (TÍCH HỢP ZOOM +/- VÀ FULLSCREEN HOẠT ĐỘNG HOÀN HẢO)
+# TAB 1: KHỞI TẠO & SƠ ĐỒ MINDMAP
 # ==========================================
 with tab1:
     col_t1_left, col_t1_right = st.columns([1.2, 1.8])
@@ -170,14 +188,12 @@ with tab1:
                 
                 zoom_fullscreen_html = """
                 <div id="mindmap-container" style="position: relative; width: 100%; height: 450px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; overflow: auto; display: flex; align-items: center; justify-content: center;">
-                    <!-- Thanh công cụ Zoom & Fullscreen -->
                     <div style="position: absolute; top: 12px; right: 12px; z-index: 9999; background: rgba(255, 255, 255, 0.95); border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); display: flex; gap: 6px; padding: 6px;">
-                        <button onclick="zoomIn()" title="Phóng to (+)" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; width: 34px; height: 34px; font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #333;">+</button>
-                        <button onclick="zoomOut()" title="Thu nhỏ (-)" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; width: 34px; height: 34px; font-weight: bold; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #333;">-</button>
-                        <button onclick="resetZoom()" title="Đặt lại" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; padding: 0 10px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; color: #333;">Reset</button>
-                        <button onclick="toggleFullscreen()" title="Toàn màn hình" style="background: #27AE60; color: white; border: none; border-radius: 4px; width: 34px; height: 34px; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center;">⛶</button>
+                        <button onclick="zoomIn()" title="Phóng to (+)" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; width: 34px; height: 34px; font-weight: bold; font-size: 18px; cursor: pointer; color: #333;">+</button>
+                        <button onclick="zoomOut()" title="Thu nhỏ (-)" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; width: 34px; height: 34px; font-weight: bold; font-size: 18px; cursor: pointer; color: #333;">-</button>
+                        <button onclick="resetZoom()" title="Đặt lại" style="background: #f8f9fa; border: 1px solid #ddd; border-radius: 4px; padding: 0 10px; font-size: 13px; font-weight: 600; cursor: pointer; color: #333;">Reset</button>
+                        <button onclick="toggleFullscreen()" title="Toàn màn hình" style="background: #27AE60; color: white; border: none; border-radius: 4px; width: 34px; height: 34px; font-size: 16px; cursor: pointer;">⛶</button>
                     </div>
-                    <!-- Vùng chứa SVG được scale -->
                     <div id="svg-wrapper" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transform-origin: center center; transition: transform 0.15s ease;">
                         REPLACE_SVG_HERE
                     </div>
@@ -302,7 +318,7 @@ with tab1:
             st.info("👈 Nhập chủ đề bên trái và bấm nút để khởi tạo không gian ý tưởng.")
 
 # ==========================================
-# TAB 2: PHÒNG LUYỆN TẬP AI (PROFESSOR WRITEWELL)
+# TAB 2: PHÒNG LUYỆN TẬP AI
 # ==========================================
 with tab2:
     st.markdown("### 🏋️ Phòng Luyện Tập AI Cùng Professor WriteWell")
@@ -480,7 +496,7 @@ with tab4:
         st.info(f"Chưa ghi nhận dữ liệu lịch sử hoặc lỗi: {e}")
 
 # ==========================================
-# TAB 5: RỪNG CỘNG ĐỒNG (ĐẤU TRƯỜNG: TRỪ 50% ĐIỂM NẾU LẠC ĐỀ + XEM LẠI BÀI & NHẬN XÉT CHI TIẾT)
+# TAB 5: RỪNG CỘNG ĐỒNG (NÂNG CẤP ĐẤU TRƯỜNG HẰNG TUẦN NÂNG CAO)
 # ==========================================
 with tab5:
     st.header("🌍 Sinh Thái Học Hỏi Cộng Đồng")
@@ -569,32 +585,64 @@ with tab5:
                 st.info(f"Đang tải thư viện: {e}")
 
     with sub_tab3:
-        st.info("🔥 **THỬ THÁCH TUẦN NÀY:** Viết 150 từ: 'The impact of AI on smart ecosystems'.")
+        st.info("🔥 **THỬ THÁCH TUẦN NÀY:** Viết bài luận hoặc đoạn văn theo bảng đấu về chủ đề: **'The impact of AI on smart ecosystems'**.")
         challenge_topic_name = "The impact of AI on smart ecosystems"
+
+        # I. CÁC HẠNG MỤC THỬ THÁCH (CHALLENGE CATEGORIES)
+        category_choice = st.selectbox(
+            "🎯 Lựa chọn Hạng mục / Bảng đấu dự thi:",
+            [
+                "Bảng A1 - A2 (Foundation & Flow): Viết đoạn ngắn (50 - 80 từ)",
+                "Bảng B1 - B2 (Express & Expand): Viết bài luận ngắn / thư (120 - 180 từ)",
+                "Bảng C1 (Master & Nuance): Nghị luận xã hội / Tiểu luận (250 - 400 từ)",
+                "Bảng SAT Writing (Rhetoric & Precision): Cải thiện đoạn văn & Lỗi cú pháp",
+                "Bảng General English (Creative & Storytelling): Sáng tạo tự do, tản văn",
+            ],
+            key="challenge_category_select"
+        )
+
         col_g1, col_g2 = st.columns([1, 1.2])
         with col_g1:
-            user_name = st.text_input("Bí danh bảng xếp hạng:")
-            challenge_essay = st.text_area("✍️ Bài dự thi của bạn:", height=150)
-            if st.button("🏅 Nộp bài & Chấm AI"):
+            st.markdown("### ✍️ Nộp bài dự thi của bạn")
+            user_name = st.text_input("Nhập bí danh / Tên của bạn:", key="challenge_user_name")
+            challenge_essay = st.text_area("✍️ Nội dung bài viết tiếng Anh:", height=180, key="challenge_essay_input")
+            
+            if st.button("🏅 Nộp bài & Chấm AI (Thang 100)", type="primary", use_container_width=True):
                 if user_name and challenge_essay and ai_client:
-                    with st.spinner("AI đang kiểm tra chủ đề, chấm điểm và đánh giá..."):
-                        res_c = ai_client.models.generate_content(
-                            model=MODEL_NAME,
-                            contents=(
-                                f"Chấm khắt khe văn bản sau theo khung {global_level} cho chủ đề chính thức là '{challenge_topic_name}'. "
-                                "QUAN TRỌNG: Hãy kiểm tra xem bài viết có bám sát chủ đề trên không. Nếu lạc đề hoàn toàn hoặc không liên quan, hãy đánh giá bài viết lạc đề.\n"
-                                "Format bắt buộc:\n"
-                                "- ĐIỂM SỐ TỔNG: [Số từ 1-100]\n"
-                                "- TRÌNH ĐỘ ĐẠT ĐƯỢC: [Mức độ tương ứng như A1, A2, B1, B2...]\n"
-                                "- CÓ LẠC ĐỀ KHÔNG: [Có hoặc Không]\n"
-                                "- NHẬN XÉT: [Nhận xét chi tiết rõ ràng, nếu lạc đề hãy nêu rõ lý do trừ 50% điểm]\n"
-                                f"Bài làm: {challenge_essay}"
-                            ),
-                        )
+                    with st.spinner("AI đang chấm điểm khắt khe trên thang 100 theo tiêu chuẩn Rubrics và kiểm tra chủ đề..."):
+                        # III. CÁCH NHẬN XÉT VÀ ĐÁNH GIÁ (Rubrics & Sandwich Feedback)
+                        prompt_challenge = f"""
+                        Đóng vai trò là Giám khảo Khảo thí Tiếng Anh Cấp cao cho '{category_choice}'.
+                        Chủ đề thử thách chính thức: '{challenge_topic_name}'.
+                        
+                        TIÊU CHÍ CHẤM ĐIỂM (RUBRICS THANG 100):
+                        1. Task Achievement / Prompt Adherence (Đáp ứng đề bài & giới hạn từ)
+                        2. Coherence & Cohesion (Mạch lạc, bố cục, từ nối)
+                        3. Lexical Resource (Từ vựng, Collocations)
+                        4. Grammatical Range & Accuracy (Ngữ pháp, cấu trúc câu)
+                        
+                        YÊU CẦU KIỂM TRA ĐỀ BÀI:
+                        - Kiểm tra xem bài viết có bám sát chủ đề '{challenge_topic_name}' không.
+                        - Nếu bài viết LẠC ĐỀ HOÀN TOÀN hoặc không liên quan đến chủ đề, hãy xác định CÓ LẠC ĐỀ.
+                        
+                        CẤU TRÚC PHẢN HỒI BẮT BUỘC (TRẢ VỀ TIẾNG VIỆT):
+                        - ĐIỂM SỐ TỔNG: [Số điểm từ 0 đến 100]
+                        - TRÌNH ĐỘ ĐẠT ĐƯỢC: [Mức độ tương ứng: A1, A2, B1, B2, C1, SAT, General]
+                        - CÓ LẠC ĐỀ KHÔNG: [Có hoặc Không]
+                        - NHẬN XÉT SANDWICH:
+                          🌟 **Điểm sáng (Khen ngợi):** [Nêu 1-2 điểm xuất sắc về từ vựng/ý tưởng]
+                          🛠️ **Góp ý cải thiện:** [Nêu 1-2 lỗi cốt lõi cần khắc phục]
+                          🚀 **Gợi ý nâng cấp (Upgrade version):** [Viết lại 1 câu trong bài làm của học viên theo hướng chuẩn bản xứ hơn]
+                        
+                        Bài làm của học viên ({user_name}):
+                        "{challenge_essay}"
+                        """
+                        res_c = ai_client.models.generate_content(model=MODEL_NAME, contents=prompt_challenge)
+                        
                         score = 70
-                        achieved_lvl = global_level.split(" ")[0]
+                        achieved_lvl = category_choice.split(" ")[1] if len(category_choice.split(" ")) > 1 else "B1"
                         is_off_topic = "Không"
-                        feedback_comment = "Bài viết hoàn thành tốt yêu cầu thử thách."
+                        feedback_comment = res_c.text
                         
                         for line in res_c.text.split("\n"):
                             if "ĐIỂM SỐ TỔNG" in line:
@@ -604,17 +652,18 @@ with tab5:
                                 achieved_lvl = line.replace("TRÌNH ĐỘ ĐẠT ĐƯỢC:", "").replace("- TRÌNH ĐỘ ĐẠT ĐƯỢC", "").strip()
                             if "CÓ LẠC ĐỀ KHÔNG" in line:
                                 if "có" in line.lower(): is_off_topic = "Có"
-                            if "NHẬN XÉT" in line:
-                                feedback_comment = line.replace("NHẬN XÉT:", "").strip()
 
+                        # Trừ 50 điểm nếu viết sai/lạc đề nhưng vẫn giữ nguyên nhận xét đánh giá đầy đủ
                         if is_off_topic == "Có":
-                            score = int(score * 0.5)
-                            feedback_comment = f"⚠️ [LẠC ĐỀ - BỊ TRỪ 50% ĐIỂM] {feedback_comment}"
+                            score = max(0, score - 50)
+                            feedback_comment = f"⚠️ **[CẢNH BÁO LẠC ĐỀ - ĐÃ TRỪ 50 ĐIỂM TRÊN THANG 100]**\nBài viết chưa bám sát chủ đề '{challenge_topic_name}'. Dưới đây là nhận xét chi tiết:\n\n" + feedback_comment
                         
                         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        board_name = category_choice.split(":")[0]
                         new_entry = {
                             "Thời gian": current_time, 
                             "Họ và tên": user_name, 
+                            "Bảng đấu": board_name,
                             "Chủ đề thử thách": challenge_topic_name, 
                             "Điểm số": score, 
                             "Trình độ đạt được": achieved_lvl, 
@@ -626,14 +675,14 @@ with tab5:
                         
                         if sheet_challenge:
                             try:
-                                sheet_challenge.append_row([current_time, user_name, challenge_topic_name, str(score), achieved_lvl, feedback_comment, challenge_essay])
+                                sheet_challenge.append_row([current_time, user_name, board_name, challenge_topic_name, str(score), achieved_lvl, feedback_comment, challenge_essay])
                             except:
                                 pass
                                 
-                        st.success(f"🎉 Hoàn thành! Điểm: {score}/100 | Trình độ: {achieved_lvl}")
+                        st.success(f"🎉 Nộp bài thành công! Điểm số: {score}/100 | Bảng: {board_name}")
                         st.rerun()
                 else:
-                    st.warning("Vui lòng nhập đầy đủ bí danh và nội dung bài viết.")
+                    st.warning("Vui lòng nhập đầy đủ bí danh và nội dung bài dự thi.")
                     
         with col_g2:
             st.markdown("### 🏆 Bảng Xếp Hạng Đấu Trường")
@@ -644,16 +693,17 @@ with tab5:
                         sheet_rows = sheet_challenge.get_all_values()
                         if len(sheet_rows) > 1:
                             for r in sheet_rows[1:]:
-                                while len(r) < 7:
+                                while len(r) < 8:
                                     r.append("N/A")
                                 rec = {
                                     "Thời gian": r[0],
                                     "Họ và tên": r[1],
-                                    "Chủ đề thử thách": r[2],
-                                    "Điểm số": int(r[3]) if str(r[3]).isdigit() else 70,
-                                    "Trình độ đạt được": r[4],
-                                    "Nhận xét AI": r[5],
-                                    "Nội dung bài làm": r[6]
+                                    "Bảng đấu": r[2],
+                                    "Chủ đề thử thách": r[3],
+                                    "Điểm số": int(r[4]) if str(r[4]).isdigit() else 70,
+                                    "Trình độ đạt được": r[5],
+                                    "Nhận xét AI": r[6],
+                                    "Nội dung bài làm": r[7]
                                 }
                                 if rec not in all_records:
                                     all_records.append(rec)
@@ -666,30 +716,28 @@ with tab5:
                     c_df = c_df.sort_values(by="Điểm số_num", ascending=False).reset_index(drop=True)
                     c_df["Xếp hạng"] = [f"Top {i+1} 🥇" if i==0 else (f"Top {i+1} 🥈" if i==1 else (f"Top {i+1} 🥉" if i==2 else f"Top {i+1}")) for i in range(len(c_df))]
                     
-                    display_df = c_df[["Thời gian", "Họ và tên", "Chủ đề thử thách", "Điểm số", "Xếp hạng"]]
-                    st.dataframe(display_df, use_container_width=True)
+                    display_cols = [col for col in ["Thời gian", "Họ và tên", "Bảng đấu", "Điểm số", "Xếp hạng"] if col in c_df.columns]
+                    st.dataframe(c_df[display_cols], use_container_width=True)
                     
                     st.markdown("---")
-                    st.markdown("#### 📖 Xem Lại Bài Làm & Nhận Xét Của AI")
-                    options = []
-                    for i, r in c_df.iterrows():
-                        options.append(f"{r['Họ and tên']} - {r['Điểm số']}đ ({r['Trình độ đạt được']}) [ID:{i}]")
+                    # II. HỆ THỐNG LƯU TRỮ BÀI VIẾT - MỞ LẠI HỒ SƠ CŨ
+                    st.markdown("#### 📖 Mở Lại Hồ Sơ Cũ & Xem Chi Tiết Bài Dự Thi")
+                    
+                    c_df["Select_Label"] = c_df["Thời gian"] + " - " + c_df["Chủ đề thử thách"] + " (" + c_df["Họ và tên"] + ")"
+                    sel_challenge_label = st.selectbox("📖 Mở lại hồ sơ cũ:", c_df["Select_Label"].tolist(), key="select_challenge_old_profile_exact")
+                    
+                    if sel_challenge_label:
+                        chosen_row = c_df[c_df["Select_Label"] == sel_challenge_label].iloc[0]
                         
-                    selected_option = st.selectbox("Chọn thành viên để xem chi tiết bài viết:", options, key="select_member_essay_fixed")
-                    if selected_option:
-                        idx_str = selected_option.split("[ID:")[1].replace("]", "")
-                        idx = int(idx_str)
-                        chosen_row = c_df.iloc[idx]
-                        
-                        st.info(f"**Tác giả:** {chosen_row['Họ and tên']} | **Thời gian:** {chosen_row['Thời gian']} | **Điểm số:** {chosen_row['Điểm số']}đ | **Trình độ đánh giá:** {chosen_row['Trình độ đạt được']}")
-                        st.markdown(f"**💬 Nhận xét và đánh giá của AI:**\n> {chosen_row.get('Nhận xét AI', 'Không có nhận xét.')}")
-                        st.text_area("✍️ Nội dung bài dự thi chi tiết:", value=chosen_row["Nội dung bài làm"], height=150, disabled=True, key=f"member_essay_view_fixed_{idx}")
+                        st.markdown(f"### 📌 {chosen_row['Chủ đề thử thách']} (Thành viên: {chosen_row['Họ và tên']} - Bảng: {chosen_row.get('Bảng đấu', 'N/A')})")
+                        st.code(chosen_row["Nội dung bài làm"], language="text")
+                        st.info(f"🏆 **Điểm số:** {chosen_row['Điểm số']}/100 | **Trình độ:** {chosen_row['Trình độ đạt được']} | **Thời gian:** {chosen_row['Thời gian']}\n\n" + str(chosen_row.get('Nhận xét AI', 'Không có nhận xét.')))
                 else:
-                    empty_df = pd.DataFrame(columns=["Thời gian", "Họ and tên", "Chủ đề thử thách", "Điểm số", "Xếp hạng"])
+                    empty_df = pd.DataFrame(columns=["Thời gian", "Họ và tên", "Bảng đấu", "Điểm số", "Xếp hạng"])
                     st.dataframe(empty_df, use_container_width=True)
                     st.info("💡 Chưa có bài nộp nào trong bảng xếp hạng. Hãy nộp bài ở cột bên trái!")
             except Exception as e:
-                empty_df = pd.DataFrame(columns=["Thời gian", "Họ and tên", "Chủ đề thử thách", "Điểm số", "Xếp hạng"])
+                empty_df = pd.DataFrame(columns=["Thời gian", "Họ và tên", "Bảng đấu", "Điểm số", "Xếp hạng"])
                 st.dataframe(empty_df, use_container_width=True)
                 st.info(f"💡 Đang khởi tạo dữ liệu bảng: {e}")
 
